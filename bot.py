@@ -1,3 +1,4 @@
+from dotenv import load_dotenv
 import logging
 import os
 
@@ -5,10 +6,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VERIFIED_ROLE_NAME = os.getenv("VERIFIED_ROLE_NAME", "Verified")
+VERIFIED_ROLE_NAME = "✅ Verified"
 ROLE_ID_MARKER = "verify_role_id:"
 
 
