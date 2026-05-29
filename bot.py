@@ -95,8 +95,8 @@ async def on_ready() -> None:
 
 @bot.tree.command(name="verifychannel", description="Set this channel as the verification channel.")
 @app_commands.describe(role="The role to use as the verified role.")
-@app_commands.default_permissions(manage_channels=True, manage_roles=True)
-@app_commands.checks.has_permissions(manage_channels=True, manage_roles=True)
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.checks.has_permissions(manage_guild=True)
 async def verifychannel(interaction: discord.Interaction, role: discord.Role) -> None:
     guild = interaction.guild
     channel = interaction.channel
@@ -158,7 +158,7 @@ async def verifychannel_error(interaction: discord.Interaction, error: app_comma
     if isinstance(error, app_commands.MissingPermissions):
         send = interaction.followup.send if interaction.response.is_done() else interaction.response.send_message
         await send(
-            "You need Manage Channels and Manage Roles permissions to use this command.",
+            "You need the 'Manage Server' permission to use this command.",
             ephemeral=True,
         )
         return
