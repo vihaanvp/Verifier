@@ -8,9 +8,8 @@ A Discord user verification bot for Discord servers.
    ```bash
    pip install -r requirements.txt
    ```
-2. Set environment variable:
+2. Set environment variable (see `.env.example` file for more information):
    - `DISCORD_BOT_TOKEN` (required)
-   - `VERIFIED_ROLE_NAME` (optional, default: `Verified`)
 3. Run the bot:
    ```bash
    python bot.py
@@ -18,7 +17,7 @@ A Discord user verification bot for Discord servers.
 
 ## Usage
 
-- Invite the bot with permissions to manage roles/channels and read/send messages.
-- Run `/verifychannel` in the channel you want to use for verification.
+- Invite the bot with permissions integer `268520464` and `bot` and `application.commands` Scopes
+- Run `/verifychannel` in the channel you want to use for verification, and also mention the "Verified role in the required command parameter"
 - The bot posts an embed with a **Verify** button.
-- Clicking the button assigns the verified role, which grants access to other channels.
+- Clicking the button assigns the verified role that you chose, which grants access to other channels if the roles are set up correctly.
