@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import logging
 import os
+import json
 
 import discord
 from discord import app_commands
@@ -11,26 +12,37 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VERIFIED_ROLE_NAME = "✅ Verified"
-ROLE_ID_MARKER = "verify_role_id:"
+VERIFY_SETTINGS_FILE = "verify_settings.json"
 
+# --------------------
+# UTIL: VERIFY SETTINGS MAPPING
+# --------------------
+def load_verify_settings():
+    if os.path.isfile(VERIFY_SETTINGS_FILE):
+        with open(VERIFY_SETTINGS_FILE, "r") as f:
+            try:
+                content = f.read().strip()
+                if not content:
+                    return {}
+                return json.loads(content)
+            except json.JSONDecodeError:
+                # If corrupted, reset file
+                return {}
+    else:
+        return {}
 
-def extract_role_id_from_topic(channel: discord.TextChannel | discord.abc.GuildChannel) -> int | None:
-    if not isinstance(channel, discord.TextChannel) or not channel.topic:
-        return None
-    for line in channel.topic.splitlines():
-        if line.startswith(ROLE_ID_MARKER):
-            role_id = line[len(ROLE_ID_MARKER) :].strip()
-            if role_id.isdigit():
-                return int(role_id)
-    return None
+def save_verify_settings(data):
+    with open(VERIFY_SETTINGS_FILE, "w") as f:
+        json.dump(data, f)
 
+def set_guild_verify_settings(guild_id, channel_id, role_id):
+    data = load_verify_settings()
+    data[str(guild_id)] = {"channel_id": channel_id, "role_id": role_id}
+    save_verify_settings(data)
 
-def write_role_id_to_topic(topic: str | None, role_id: int) -> str:
-    lines = [] if topic is None else [line for line in topic.splitlines() if not line.startswith(ROLE_ID_MARKER)]
-    lines.append(f"{ROLE_ID_MARKER}{role_id}")
-    return "\n".join(lines)
-
+def get_guild_verify_settings(guild_id):
+    data = load_verify_settings()
+    return data.get(str(guild_id))
 
 class VerifyView(discord.ui.View):
     def __init__(self) -> None:
@@ -39,21 +51,20 @@ class VerifyView(discord.ui.View):
     @discord.ui.button(label="Verify", style=discord.ButtonStyle.success, custom_id="verify:button")
     async def verify_button(self, interaction: discord.Interaction, _: discord.ui.Button) -> None:
         guild = interaction.guild
-        channel = interaction.channel
         member = interaction.user
         if guild is None or not isinstance(member, discord.Member):
             await interaction.response.send_message("This button can only be used in a server.", ephemeral=True)
             return
 
+        settings = get_guild_verify_settings(guild.id)
         verified_role = None
-        role_id = extract_role_id_from_topic(channel) if isinstance(channel, discord.abc.GuildChannel) else None
-        if role_id is not None:
-            verified_role = guild.get_role(role_id)
-        if verified_role is None:
-            verified_role = discord.utils.get(guild.roles, name=VERIFIED_ROLE_NAME)
+        if settings:
+            role_id = settings.get("role_id")
+            if role_id:
+                verified_role = guild.get_role(int(role_id))
         if verified_role is None:
             await interaction.response.send_message(
-                f"Verified role '{VERIFIED_ROLE_NAME}' is missing. Ask an admin to run /verifychannel again.",
+                f"Verified role is missing. Ask an admin to run /verifychannel again.",
                 ephemeral=True,
             )
             return
@@ -78,23 +89,15 @@ intents = discord.Intents.default()
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
 @bot.event
 async def on_ready() -> None:
     logging.info("Logged in as %s (%s)", bot.user, bot.user.id if bot.user else "unknown")
 
-
-async def get_or_create_verified_role(guild: discord.Guild) -> discord.Role:
-    role = discord.utils.get(guild.roles, name=VERIFIED_ROLE_NAME)
-    if role is None:
-        role = await guild.create_role(name=VERIFIED_ROLE_NAME, reason="Role required for verification workflow.")
-    return role
-
-
 @bot.tree.command(name="verifychannel", description="Set this channel as the verification channel.")
+@app_commands.describe(role="The role to use as the verified role.")
 @app_commands.default_permissions(manage_channels=True, manage_roles=True)
 @app_commands.checks.has_permissions(manage_channels=True, manage_roles=True)
-async def verifychannel(interaction: discord.Interaction) -> None:
+async def verifychannel(interaction: discord.Interaction, role: discord.Role) -> None:
     guild = interaction.guild
     channel = interaction.channel
     if guild is None or not isinstance(channel, discord.TextChannel):
@@ -104,7 +107,6 @@ async def verifychannel(interaction: discord.Interaction) -> None:
     await interaction.response.defer(ephemeral=True, thinking=True)
 
     try:
-        verified_role = await get_or_create_verified_role(guild)
         everyone = guild.default_role
 
         for guild_channel in guild.channels:
@@ -117,25 +119,25 @@ async def verifychannel(interaction: discord.Interaction) -> None:
                 if guild_channel.overwrites_for(everyone) != everyone_overwrite:
                     await guild_channel.set_permissions(everyone, overwrite=everyone_overwrite)
 
-                verified_overwrite = guild_channel.overwrites_for(verified_role)
+                verified_overwrite = guild_channel.overwrites_for(role)
                 verified_overwrite.view_channel = True
                 verified_overwrite.send_messages = True
-                if guild_channel.overwrites_for(verified_role) != verified_overwrite:
-                    await guild_channel.set_permissions(verified_role, overwrite=verified_overwrite)
+                if guild_channel.overwrites_for(role) != verified_overwrite:
+                    await guild_channel.set_permissions(role, overwrite=verified_overwrite)
             else:
                 everyone_overwrite = guild_channel.overwrites_for(everyone)
                 everyone_overwrite.view_channel = False
                 if guild_channel.overwrites_for(everyone) != everyone_overwrite:
                     await guild_channel.set_permissions(everyone, overwrite=everyone_overwrite)
 
-                verified_overwrite = guild_channel.overwrites_for(verified_role)
+                verified_overwrite = guild_channel.overwrites_for(role)
                 verified_overwrite.view_channel = True
-                if guild_channel.overwrites_for(verified_role) != verified_overwrite:
-                    await guild_channel.set_permissions(verified_role, overwrite=verified_overwrite)
+                if guild_channel.overwrites_for(role) != verified_overwrite:
+                    await guild_channel.set_permissions(role, overwrite=verified_overwrite)
 
-        new_topic = write_role_id_to_topic(channel.topic, verified_role.id)
-        if channel.topic != new_topic:
-            await channel.edit(topic=new_topic)
+        # Store verification channel and role ID mapping in the JSON
+        set_guild_verify_settings(guild.id, channel.id, role.id)
+
     except discord.Forbidden:
         await interaction.followup.send(
             "I need Manage Channels and Manage Roles permissions to configure verification.",
@@ -151,7 +153,6 @@ async def verifychannel(interaction: discord.Interaction) -> None:
     await channel.send(embed=embed, view=VerifyView())
     await interaction.followup.send("Verification channel configured.", ephemeral=True)
 
-
 @verifychannel.error
 async def verifychannel_error(interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
     if isinstance(error, app_commands.MissingPermissions):
@@ -163,12 +164,10 @@ async def verifychannel_error(interaction: discord.Interaction, error: app_comma
         return
     raise error
 
-
 @bot.event
 async def setup_hook() -> None:
     bot.add_view(VerifyView())
     await bot.tree.sync()
-
 
 if __name__ == "__main__":
     if not TOKEN:
